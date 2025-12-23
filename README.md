@@ -14,3 +14,6 @@ ats-ats-node/
 │   └── prometheus_exporter.py
 └── tests/
     └── test_gpio_oled.py
+
+## Role of the ATS Node
+The ATS node is the execution and observation plane of the ATS platform. It is intentionally separated from CI infrastructure to ensure deterministic hardware access, reliable test execution, and reproducible results on real devices.
