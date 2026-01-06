@@ -2,13 +2,36 @@
 import argparse
 import sys
 import os
+import time
+import json
 from pathlib import Path
 from typing import Dict, Any, List
+from datetime import datetime
 
 from .manifest import load_manifest, get_artifact_name, get_device_target, get_test_plan
 from .hardware import detect_esp32_port, check_gpio_access
 from .flash_esp32 import flash_firmware, reset_esp32
 from .results import write_summary, write_junit, write_meta
+
+# Debug logging
+DEBUG_LOG_PATH = "/home/thait/.cursor/debug.log"
+
+def debug_log(location: str, message: str, data: dict = None, hypothesis_id: str = None):
+    """Write debug log entry."""
+    try:
+        log_entry = {
+            "sessionId": "debug-session",
+            "runId": "run1",
+            "hypothesisId": hypothesis_id,
+            "location": location,
+            "message": message,
+            "data": data or {},
+            "timestamp": int(datetime.now().timestamp() * 1000)
+        }
+        with open(DEBUG_LOG_PATH, "a") as f:
+            f.write(json.dumps(log_entry) + "\n")
+    except Exception:
+        pass  # Silently fail if logging doesn't work
 
 
 def run_test_runner(workspace: str, manifest: Dict[str, Any], results_dir: str) -> List[Dict[str, Any]]:
@@ -109,11 +132,82 @@ def main():
     # Step 1: Flash firmware
     if device_target == 'esp32':
         print("\n🔌 Flashing firmware...")
+        # #region agent log
+        debug_log("executor.py:112", "Before flash_firmware", {
+            "artifact_path": str(artifact_path),
+            "port": detect_esp32_port()
+        }, "A")
+        # #endregion
+        flash_start_time = time.time()
         if not flash_firmware(str(artifact_path)):
             print("❌ Flash failed", file=sys.stderr)
             exit_code = 1
         else:
+            flash_end_time = time.time()
+            flash_duration = flash_end_time - flash_start_time
             print("✅ Flash successful")
+            # #region agent log
+            debug_log("executor.py:116", "After flash_firmware", {
+                "flash_duration_seconds": flash_duration,
+                "flash_success": True
+            }, "A")
+            # #endregion
+            
+            # CRITICAL: ESP32 needs time to boot after reset
+            # esptool does --after hard_reset, but we need to wait for boot
+            print("\n⏳ Waiting for ESP32 to boot after reset...")
+            boot_wait_start = time.time()
+            # #region agent log
+            debug_log("executor.py:123", "Before boot wait", {
+                "wait_start_time": boot_wait_start
+            }, "A")
+            # #endregion
+            
+            # Wait for ESP32 boot (typically 1-3 seconds)
+            # Also ensures serial port is released by esptool
+            time.sleep(3.0)  # 3 second boot delay
+            
+            boot_wait_end = time.time()
+            boot_wait_duration = boot_wait_end - boot_wait_start
+            print(f"✅ Boot wait complete ({boot_wait_duration:.2f}s)")
+            # #region agent log
+            debug_log("executor.py:132", "After boot wait", {
+                "wait_duration_seconds": boot_wait_duration,
+                "wait_complete": True
+            }, "A")
+            # #endregion
+            
+            # Optional: Explicit reset to ensure clean boot state
+            port = detect_esp32_port()
+            if port:
+                print(f"🔄 Performing explicit reset on {port}...")
+                # #region agent log
+                debug_log("executor.py:139", "Before explicit reset", {
+                    "port": port
+                }, "E")
+                # #endregion
+                reset_start = time.time()
+                reset_success = reset_esp32(port)
+                reset_end = time.time()
+                reset_duration = reset_end - reset_start
+                # #region agent log
+                debug_log("executor.py:145", "After explicit reset", {
+                    "reset_success": reset_success,
+                    "reset_duration_seconds": reset_duration
+                }, "E")
+                # #endregion
+                if reset_success:
+                    print("✅ Reset successful")
+                    # Wait again after explicit reset
+                    print("⏳ Waiting for ESP32 to boot after explicit reset...")
+                    time.sleep(2.0)  # Additional 2 second wait
+                    # #region agent log
+                    debug_log("executor.py:152", "After second boot wait", {
+                        "second_wait_seconds": 2.0
+                    }, "A")
+                    # #endregion
+                else:
+                    print("⚠️  Reset failed, continuing anyway")
     else:
         print(f"⚠️  Unknown device target: {device_target}")
         exit_code = 1
@@ -121,7 +215,22 @@ def main():
     # Step 2: Run tests
     if exit_code == 0:
         print("\n🧪 Running tests...")
+        # #region agent log
+        debug_log("executor.py:163", "Before run_test_runner", {
+            "workspace": workspace,
+            "time_since_flash": time.time() - flash_start_time if device_target == 'esp32' else None
+        }, "D")
+        # #endregion
+        test_runner_start = time.time()
         tests = run_test_runner(args.workspace, manifest, args.results_dir)
+        test_runner_end = time.time()
+        # #region agent log
+        debug_log("executor.py:169", "After run_test_runner", {
+            "test_runner_duration_seconds": test_runner_end - test_runner_start,
+            "test_count": len(tests),
+            "test_statuses": [t.get('status') for t in tests]
+        }, "D")
+        # #endregion
         
         # Check if any test failed
         if any(t.get('status') == 'FAIL' for t in tests):

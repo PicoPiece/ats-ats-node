@@ -2,8 +2,31 @@
 import os
 import subprocess
 import sys
+import json
+import time
 from typing import Optional
+from datetime import datetime
 from .hardware import detect_esp32_port
+
+# Debug logging
+DEBUG_LOG_PATH = "/home/thait/.cursor/debug.log"
+
+def debug_log(location: str, message: str, data: dict = None, hypothesis_id: str = None):
+    """Write debug log entry."""
+    try:
+        log_entry = {
+            "sessionId": "debug-session",
+            "runId": "run1",
+            "hypothesisId": hypothesis_id,
+            "location": location,
+            "message": message,
+            "data": data or {},
+            "timestamp": int(datetime.now().timestamp() * 1000)
+        }
+        with open(DEBUG_LOG_PATH, "a") as f:
+            f.write(json.dumps(log_entry) + "\n")
+    except Exception:
+        pass  # Silently fail if logging doesn't work
 
 
 def flash_firmware(firmware_path: str, port: Optional[str] = None) -> bool:
@@ -39,10 +62,42 @@ def flash_firmware(firmware_path: str, port: Optional[str] = None) -> bool:
     ]
     
     try:
+        # #region agent log
+        debug_log("flash_esp32.py:42", "Before esptool subprocess", {
+            "cmd": cmd,
+            "port": port,
+            "firmware_path": firmware_path
+        }, "C")
+        # #endregion
+        flash_start = time.time()
         result = subprocess.run(cmd, check=True, capture_output=True, text=True)
+        flash_end = time.time()
+        flash_duration = flash_end - flash_start
+        # #region agent log
+        debug_log("flash_esp32.py:50", "After esptool subprocess", {
+            "flash_duration_seconds": flash_duration,
+            "flash_success": True,
+            "stdout_length": len(result.stdout),
+            "stderr_length": len(result.stderr),
+            "has_hard_reset": "--after hard_reset" in " ".join(cmd)
+        }, "C")
+        # #endregion
         print("✅ Firmware flashed successfully")
+        # #region agent log
+        debug_log("flash_esp32.py:59", "Flash complete, checking serial port release", {
+            "port": port,
+            "time_after_flash": time.time() - flash_end
+        }, "C")
+        # #endregion
         return True
     except subprocess.CalledProcessError as e:
+        # #region agent log
+        debug_log("flash_esp32.py:65", "Flash failed", {
+            "error": str(e),
+            "stderr": e.stderr[:200] if e.stderr else None,
+            "returncode": e.returncode
+        }, "C")
+        # #endregion
         print(f"❌ Flash failed: {e.stderr}", file=sys.stderr)
         return False
 
