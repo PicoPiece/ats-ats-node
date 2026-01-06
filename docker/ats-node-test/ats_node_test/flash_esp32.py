@@ -21,10 +21,12 @@ def flash_firmware(firmware_path: str, port: Optional[str] = None) -> bool:
     
     print(f"📡 Flashing firmware to {port}...")
     
+    # Auto-detect chip type - esptool will detect the connected chip
     # Flash at 0x10000 (app partition)
+    # If chip type doesn't match firmware, esptool will fail (this is correct behavior)
     cmd = [
         'esptool.py',
-        '--chip', 'esp32',
+        '--chip', 'auto',  # Auto-detect chip type (ESP32, ESP32-S2, ESP32-S3, etc.)
         '--port', port,
         '--baud', '460800',
         '--before', 'default_reset',
@@ -54,7 +56,7 @@ def reset_esp32(port: Optional[str] = None) -> bool:
         return False
     
     try:
-        subprocess.run(['esptool.py', '--chip', 'esp32', '--port', port, 'run'], 
+        subprocess.run(['esptool.py', '--chip', 'auto', '--port', port, 'run'], 
                       check=True, capture_output=True)
         return True
     except subprocess.CalledProcessError:

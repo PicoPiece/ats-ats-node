@@ -12,7 +12,6 @@ RUN apt-get update && apt-get install -y \
     build-essential \
     python3-pip \
     python3-dev \
-    pyserial \
     minicom \
     screen \
     usbutils \
@@ -28,23 +27,20 @@ RUN pip3 install --no-cache-dir \
     pytest \
     pytest-html
 
-# Create working directory
-WORKDIR /workspace
-
-# Copy ATS node test execution code
-COPY ats_node_test/ /workspace/ats_node_test/
-COPY entrypoint.sh /workspace/entrypoint.sh
+# Copy ATS node test execution code to /app (separate from workspace)
+COPY ats_node_test/ /app/ats_node_test/
+COPY entrypoint.sh /app/entrypoint.sh
 
 # Make entrypoint executable
-RUN chmod +x /workspace/entrypoint.sh
+RUN chmod +x /app/entrypoint.sh
 
 # Set environment variables
 ENV PYTHONUNBUFFERED=1
-ENV PYTHONPATH=/workspace
+ENV PYTHONPATH=/app
 
 # Results directory (mounted by Jenkins)
 ENV RESULTS_DIR=/workspace/results
 
 # Default entrypoint
-ENTRYPOINT ["/workspace/entrypoint.sh"]
+ENTRYPOINT ["/app/entrypoint.sh"]
 
