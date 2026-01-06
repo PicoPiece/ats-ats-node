@@ -25,20 +25,64 @@ echo ""
 # Build image
 echo "🔨 Building Docker image..."
 cd "$SCRIPT_DIR"
-docker build -t "${FULL_IMAGE}" .
 
-# Tag as latest locally too
-docker tag "${FULL_IMAGE}" "ats-node-test:latest"
+# Check if buildx is available for multi-arch builds
+if docker buildx version > /dev/null 2>&1; then
+    echo "📦 Using buildx for multi-architecture build (amd64, arm64)..."
+    
+    # Create builder if it doesn't exist
+    if ! docker buildx inspect ats-builder > /dev/null 2>&1; then
+        echo "🔧 Creating buildx builder..."
+        docker buildx create --name ats-builder --use
+        docker buildx inspect --bootstrap
+    else
+        docker buildx use ats-builder
+    fi
+    
+    # Build and push multi-arch image
+    echo "🏗️  Building for linux/amd64,linux/arm64..."
+    docker buildx build \
+        --platform linux/amd64,linux/arm64 \
+        --tag "${FULL_IMAGE}" \
+        --push \
+        .
+    
+    echo "✅ Multi-arch image built and pushed: ${FULL_IMAGE}"
+    echo "   Supports: amd64 (Xeon server) and arm64 (Raspberry Pi)"
+    
+    # Also tag locally for amd64 (current machine)
+    docker pull "${FULL_IMAGE}" --platform linux/amd64
+    docker tag "${FULL_IMAGE}" "ats-node-test:latest"
+else
+    echo "⚠️  buildx not available, building for current platform only"
+    echo "   For Raspberry Pi support, install buildx: https://docs.docker.com/buildx/working-with-buildx/"
+    docker build -t "${FULL_IMAGE}" .
+fi
+
+# Tag as latest locally too (only if not using buildx)
+if ! docker buildx version > /dev/null 2>&1; then
+    docker tag "${FULL_IMAGE}" "ats-node-test:latest"
+fi
 
 echo ""
 echo "✅ Image built: ${FULL_IMAGE}"
 echo ""
 
+# Ask if user wants to push (skip if already pushed via buildx)
+if docker buildx version > /dev/null 2>&1 && docker buildx inspect ats-builder > /dev/null 2>&1; then
+    echo ""
+    echo "✅ Image already pushed via buildx (multi-arch)"
+    PUSH_SKIP=true
+else
+    PUSH_SKIP=false
+fi
+
 # Ask if user wants to push
-read -p "Push to registry? (y/N): " -n 1 -r
-echo
-if [[ $REPLY =~ ^[Yy]$ ]]; then
-    echo "📤 Pushing to registry..."
+if [ "$PUSH_SKIP" = false ]; then
+    read -p "Push to registry? (y/N): " -n 1 -r
+    echo
+    if [[ $REPLY =~ ^[Yy]$ ]]; then
+        echo "📤 Pushing to registry..."
     
     # Check if logged in to registry
     if [[ "${REGISTRY}" == "ghcr.io" ]]; then
@@ -84,8 +128,9 @@ if [[ $REPLY =~ ^[Yy]$ ]]; then
         echo ""
         echo "Image is available locally as: ${FULL_IMAGE}"
     fi
-else
-    echo "⏭️  Skipped push. Image available locally as: ${FULL_IMAGE}"
+    else
+        echo "⏭️  Skipped push. Image available locally as: ${FULL_IMAGE}"
+    fi
 fi
 
 echo ""
