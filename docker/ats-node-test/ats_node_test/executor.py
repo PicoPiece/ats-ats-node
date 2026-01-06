@@ -217,7 +217,7 @@ def main():
         print("\n🧪 Running tests...")
         # #region agent log
         debug_log("executor.py:163", "Before run_test_runner", {
-            "workspace": workspace,
+            "workspace": args.workspace,
             "time_since_flash": time.time() - flash_start_time if device_target == 'esp32' else None
         }, "D")
         # #endregion
