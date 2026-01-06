@@ -128,6 +128,7 @@ def main():
     os.makedirs(args.results_dir, exist_ok=True)
     
     exit_code = 0
+    flash_start_time = None
     
     # Step 1: Flash firmware
     if device_target == 'esp32':
