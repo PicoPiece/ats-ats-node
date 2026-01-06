@@ -14,6 +14,21 @@ RESULTS_DIR="${RESULTS_DIR:-/workspace/results}"
 echo "🚀 [ATS Node] Starting test execution"
 echo "📋 Manifest: ${MANIFEST_PATH}"
 echo "📊 Results: ${RESULTS_DIR}"
+echo ""
+
+# CRITICAL: Check if /workspace is mounted BEFORE anything else
+echo "🔍 Step 1: Checking workspace mount..."
+if [ ! -d "/workspace" ]; then
+    echo "❌ CRITICAL: /workspace directory does NOT exist!"
+    echo "   This means volume mount failed or path is wrong."
+    echo "   Container cannot proceed without workspace mount."
+    exit 1
+fi
+
+echo "✅ /workspace directory exists"
+echo "   Contents:"
+ls -lah /workspace/ 2>&1 | head -15 || echo "   (cannot list)"
+echo ""
 
 # Debug: Show container environment
 echo "🔍 Container debug info:"
