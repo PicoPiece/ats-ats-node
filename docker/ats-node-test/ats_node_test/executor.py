@@ -223,7 +223,8 @@ fi'''
                     
                     # Pattern 5: Replace validation check to use boot_messages.log
                     # Find pattern: grep -qi ets Jun|Guru Meditation|Hello from ESP32|ATS ESP32|Build successful /workspace/results/uart_boot.log
-                    validation_grep_pattern = r'if\s+grep\s+-qi\s+ets Jun\|Guru Meditation\|Hello from ESP32\|ATS ESP32\|Build successful[^\n]*uart_boot\.log[^\n]*\n\s+then[^\n]*\n\s+echo\s+✅\s+UART boot validation PASSED[^\n]*\n\s+TEST_RESULTS\+=\[UART_BOOT=PASS\][^\n]*\n\s+\(\(TEST_PASSED\+\+\)\)[^\n]*\n\s+else[^\n]*\n\s+echo[^\n]*\n\s+fi'
+                    # Use DOTALL to match across newlines
+                    validation_grep_pattern = r'if\s+grep\s+-qi\s+ets Jun\|Guru Meditation\|Hello from ESP32\|ATS ESP32\|Build successful.*?uart_boot\.log.*?then.*?echo\s+✅\s+UART boot validation PASSED.*?TEST_RESULTS\+=\[UART_BOOT=PASS\].*?\(\(TEST_PASSED\+\+\).*?else.*?echo.*?fi'
                     validation_replacement = f'''# Check boot_messages.log for validation
 if [ -f "${{BOOT_MESSAGES_LOG}}" ] && [ -s "${{BOOT_MESSAGES_LOG}}" ]; then
     # Search for boot patterns in boot_messages.log
@@ -240,7 +241,7 @@ else
     echo "❌ UART boot validation FAILED (boot_messages.log not found)"
     BOOT_VALIDATION_PASSED=false
 fi'''
-                    modified_script = re.sub(validation_grep_pattern, validation_replacement, modified_script, flags=re.IGNORECASE | re.MULTILINE)
+                    modified_script = re.sub(validation_grep_pattern, validation_replacement, modified_script, flags=re.IGNORECASE | re.MULTILINE | re.DOTALL)
                     
                     # Pattern 6: Also replace simple "UART boot validation FAILED" message
                     validation_fail_pattern = r'❌\s*UART boot validation FAILED[^\n]*'
