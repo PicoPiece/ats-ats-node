@@ -5,7 +5,7 @@ import os
 import time
 import json
 from pathlib import Path
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Tuple
 from datetime import datetime
 
 from .manifest import load_manifest, get_artifact_name, get_device_target, get_test_plan
@@ -34,6 +34,83 @@ def debug_log(location: str, message: str, data: dict = None, hypothesis_id: str
         pass  # Silently fail if logging doesn't work
 
 
+def test_uart_read_directly(port: str, timeout: int = 5) -> Tuple[bool, str]:
+    """Test UART read directly to debug boot messages."""
+    try:
+        import serial
+        import time
+        
+        print(f"🔍 [DEBUG] Testing direct UART read from {port}...")
+        # #region agent log
+        debug_log("executor.py:test_uart_read", "Before direct UART read", {
+            "port": port,
+            "timeout": timeout
+        }, "F")
+        # #endregion
+        
+        ser = serial.Serial(port, 115200, timeout=timeout)
+        time.sleep(0.1)  # Small delay for port to stabilize
+        
+        # Flush buffers
+        ser.reset_input_buffer()
+        ser.reset_output_buffer()
+        
+        # Read for specified timeout
+        start_time = time.time()
+        data = b""
+        while time.time() - start_time < timeout:
+            if ser.in_waiting > 0:
+                chunk = ser.read(ser.in_waiting)
+                data += chunk
+                # #region agent log
+                debug_log("executor.py:test_uart_read", "UART data chunk received", {
+                    "chunk_length": len(chunk),
+                    "total_length": len(data),
+                    "chunk_preview": chunk[:100].decode('utf-8', errors='ignore')
+                }, "F")
+                # #endregion
+            time.sleep(0.1)
+        
+        ser.close()
+        
+        data_str = data.decode('utf-8', errors='ignore')
+        success = len(data) > 0
+        
+        print(f"🔍 [DEBUG] UART read result: {len(data)} bytes")
+        if data_str:
+            print(f"🔍 [DEBUG] First 200 chars: {data_str[:200]}")
+            # Check for common ESP32 boot patterns
+            patterns = ['rst:', 'ets Jun', 'ESP-IDF', 'Guru Meditation', 'boot:', 'I (', 'E (', 'W (']
+            found_patterns = [p for p in patterns if p in data_str]
+            if found_patterns:
+                print(f"✅ [DEBUG] Found boot patterns: {', '.join(found_patterns)}")
+            else:
+                print(f"⚠️  [DEBUG] No common boot patterns found")
+        
+        # #region agent log
+        debug_log("executor.py:test_uart_read", "After direct UART read", {
+            "success": success,
+            "data_length": len(data),
+            "data_preview": data_str[:500],
+            "found_patterns": found_patterns if data_str else []
+        }, "F")
+        # #endregion
+        
+        return success, data_str
+    except ImportError:
+        print("⚠️  [DEBUG] pyserial not available for direct UART test")
+        return False, ""
+    except Exception as e:
+        print(f"❌ [DEBUG] Direct UART read failed: {e}")
+        # #region agent log
+        debug_log("executor.py:test_uart_read", "Direct UART read exception", {
+            "error": str(e),
+            "error_type": type(e).__name__
+        }, "F")
+        # #endregion
+        return False, str(e)
+
+
 def run_test_runner(workspace: str, manifest: Dict[str, Any], results_dir: str) -> List[Dict[str, Any]]:
     """Invoke test runner (ats-test-esp32-demo) and collect results."""
     # Test runner is expected to be in workspace
@@ -41,6 +118,16 @@ def run_test_runner(workspace: str, manifest: Dict[str, Any], results_dir: str) 
     test_runner_path = Path(workspace) / "ats-test-esp32-demo" / "agent" / "run_tests.sh"
     
     tests = []
+    
+    # CRITICAL: Test UART read directly BEFORE test runner to verify ESP32 is actually booting
+    port = os.environ.get('SERIAL_PORT', '/dev/ttyUSB0')
+    if os.path.exists(port):
+        print("\n🔍 [DEBUG] Pre-flight UART check before test runner...")
+        uart_success, uart_data = test_uart_read_directly(port, timeout=3)
+        if uart_success:
+            print(f"✅ [DEBUG] UART is readable, got {len(uart_data)} bytes")
+        else:
+            print(f"⚠️  [DEBUG] UART read returned no data - ESP32 may not be booting")
     
     if test_runner_path.exists():
         import subprocess
@@ -53,7 +140,16 @@ def run_test_runner(workspace: str, manifest: Dict[str, Any], results_dir: str) 
         env['TEST_REPORT_DIR'] = results_dir
         env['RESULTS_DIR'] = results_dir
         env['WORKSPACE'] = workspace
-        env['SERIAL_PORT'] = os.environ.get('SERIAL_PORT', '/dev/ttyUSB0')
+        env['SERIAL_PORT'] = port
+        
+        # #region agent log
+        debug_log("executor.py:run_test_runner", "Before subprocess.run", {
+            "test_runner_path": str(test_runner_path),
+            "manifest_path": str(manifest_path),
+            "port": port,
+            "uart_precheck_success": uart_success if 'uart_success' in locals() else None
+        }, "D")
+        # #endregion
         
         try:
             result = subprocess.run(
@@ -63,6 +159,16 @@ def run_test_runner(workspace: str, manifest: Dict[str, Any], results_dir: str) 
                 capture_output=True,
                 text=True
             )
+            
+            # #region agent log
+            debug_log("executor.py:run_test_runner", "After subprocess.run", {
+                "returncode": result.returncode,
+                "stdout_length": len(result.stdout),
+                "stderr_length": len(result.stderr),
+                "stdout_preview": result.stdout[:500] if result.stdout else None,
+                "stderr_preview": result.stderr[:500] if result.stderr else None
+            }, "D")
+            # #endregion
             
             # Print test runner output
             if result.stdout:
@@ -78,6 +184,12 @@ def run_test_runner(workspace: str, manifest: Dict[str, Any], results_dir: str) 
                 'failure': result.stderr if result.returncode != 0 else ''
             })
         except Exception as e:
+            # #region agent log
+            debug_log("executor.py:run_test_runner", "Subprocess exception", {
+                "error": str(e),
+                "error_type": type(e).__name__
+            }, "D")
+            # #endregion
             tests.append({
                 'name': 'test_execution',
                 'status': 'FAIL',
