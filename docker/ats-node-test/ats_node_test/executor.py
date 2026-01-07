@@ -199,11 +199,16 @@ fi
         # Test runner should output to results_dir
         # Pass manifest path as argument
         manifest_path = Path(workspace) / "ats-manifest.yaml"
+        
+        # Detect serial port for ESP32
+        port = detect_esp32_port()
+        
         env = os.environ.copy()
         env['TEST_REPORT_DIR'] = results_dir
         env['RESULTS_DIR'] = results_dir
         env['WORKSPACE'] = workspace
-        env['SERIAL_PORT'] = port
+        if port:
+            env['SERIAL_PORT'] = port
         # Pass boot messages file if available
         if boot_messages_file and boot_messages_file.exists():
             env['BOOT_MESSAGES_FILE'] = str(boot_messages_file)
@@ -221,8 +226,7 @@ fi
         debug_log("executor.py:run_test_runner", "Before subprocess.run", {
             "test_runner_path": str(test_runner_path),
             "manifest_path": str(manifest_path),
-            "port": port,
-            "uart_precheck_success": uart_success if 'uart_success' in locals() else None
+            "port": port
         }, "D")
         # #endregion
         
