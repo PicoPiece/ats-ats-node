@@ -202,16 +202,8 @@ fi
 # Export path for test case to use
 export BOOT_MESSAGES_LOG="${{BOOT_MESSAGES_LOG}}"
 
-# Override ats-uart-read function/command to read from boot_messages.log
-# This ensures test case uses file instead of UART
-ats_uart_read_original() {{
-    # Original UART read logic (if needed as fallback)
-    echo "⚠️  [ATS] Original UART read called but should use boot_messages.log"
-    return 1
-}}
-
-# Override: Read from boot_messages.log instead of UART
-ats-uart-read() {{
+# Helper function to read boot messages from file (used by test case)
+read_boot_messages_from_file() {{
     if [ -f "${{BOOT_MESSAGES_LOG}}" ] && [ -s "${{BOOT_MESSAGES_LOG}}" ]; then
         echo "📄 [ATS] Reading boot messages from ${{BOOT_MESSAGES_LOG}}"
         cat "${{BOOT_MESSAGES_LOG}}"
@@ -222,8 +214,15 @@ ats-uart-read() {{
     fi
 }}
 
-# Export function so it can be used by test case
-export -f ats-uart-read 2>/dev/null || true
+# Override ats-uart-read command if it exists (create alias/function)
+# Note: Function names cannot have hyphens, so we create a wrapper
+if command -v ats-uart-read >/dev/null 2>&1; then
+    # Command exists, create wrapper
+    ats_uart_read_wrapper() {{
+        read_boot_messages_from_file
+    }}
+    alias "ats-uart-read=ats_uart_read_wrapper" 2>/dev/null || true
+fi
 
 '''
                     # Insert at the beginning after shebang
