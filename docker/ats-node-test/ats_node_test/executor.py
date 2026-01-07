@@ -200,13 +200,58 @@ def main():
                 if reset_success:
                     print("✅ Reset successful")
                     # Wait again after explicit reset
+                    # CRITICAL: ESP32 boot messages appear within first 1-2 seconds after reset
+                    # We need to wait just enough for boot to start, but not too long to miss messages
                     print("⏳ Waiting for ESP32 to boot after explicit reset...")
-                    time.sleep(2.0)  # Additional 2 second wait
                     # #region agent log
-                    debug_log("executor.py:152", "After second boot wait", {
-                        "second_wait_seconds": 2.0
+                    debug_log("executor.py:203", "Before second boot wait", {
+                        "wait_seconds": 2.0,
+                        "note": "Boot messages appear in first 1-2s after reset"
                     }, "A")
                     # #endregion
+                    time.sleep(2.0)  # Additional 2 second wait
+                    # #region agent log
+                    debug_log("executor.py:210", "After second boot wait", {
+                        "second_wait_seconds": 2.0,
+                        "total_wait_since_flash": time.time() - flash_start_time
+                    }, "A")
+                    # #endregion
+                    
+                    # Flush serial buffer to ensure clean read
+                    # This ensures we don't read stale data from previous operations
+                    print("🔄 Flushing serial buffer...")
+                    try:
+                        import serial
+                        # Open serial port with common ESP32 baud rates
+                        # Try 115200 first (most common), then 9600
+                        for baud in [115200, 9600]:
+                            try:
+                                ser = serial.Serial(port, baud, timeout=0.5)
+                                ser.reset_input_buffer()  # Flush input buffer
+                                ser.reset_output_buffer()  # Flush output buffer
+                                ser.close()
+                                print(f"✅ Serial buffer flushed at {baud} baud")
+                                # #region agent log
+                                debug_log("executor.py:223", "Serial buffer flushed", {
+                                    "port": port,
+                                    "baud": baud
+                                }, "B")
+                                # #endregion
+                                break
+                            except (serial.SerialException, OSError):
+                                continue
+                    except ImportError:
+                        print("⚠️  pyserial not available, skipping buffer flush")
+                        # #region agent log
+                        debug_log("executor.py:235", "Serial flush skipped - pyserial not available", {}, "B")
+                        # #endregion
+                    except Exception as e:
+                        print(f"⚠️  Could not flush serial buffer: {e}")
+                        # #region agent log
+                        debug_log("executor.py:240", "Serial flush failed", {
+                            "error": str(e)
+                        }, "B")
+                        # #endregion
                 else:
                     print("⚠️  Reset failed, continuing anyway")
     else:
@@ -215,21 +260,52 @@ def main():
     
     # Step 2: Run tests
     if exit_code == 0:
+        # CRITICAL TIMING: ESP32 boot messages appear within first 1-3 seconds after reset
+        # Test runner must start reading UART IMMEDIATELY after boot wait
+        # If we wait too long, boot messages will be missed
+        if device_target == 'esp32' and flash_start_time:
+            time_since_flash = time.time() - flash_start_time
+            print(f"\n⏱️  Time since flash: {time_since_flash:.2f}s")
+            # #region agent log
+            debug_log("executor.py:240", "Before run_test_runner - timing check", {
+                "workspace": args.workspace,
+                "time_since_flash": time_since_flash,
+                "note": "Boot messages window: 0-3s after reset"
+            }, "D")
+            # #endregion
+            
+            # If too much time has passed, boot messages may have been missed
+            # In this case, we should do another reset to trigger fresh boot messages
+            if time_since_flash > 8.0:  # More than 8 seconds since flash
+                print("⚠️  Too much time has passed since flash, performing fresh reset for boot messages...")
+                port = detect_esp32_port()
+                if port:
+                    reset_esp32(port)
+                    time.sleep(1.0)  # Short wait for boot to start
+                    print("✅ Fresh reset complete, test runner should catch boot messages now")
+                    # #region agent log
+                    debug_log("executor.py:253", "Fresh reset for boot messages", {
+                        "time_since_flash_before_reset": time_since_flash,
+                        "reset_reason": "Too much time passed, boot messages may be missed"
+                    }, "D")
+                    # #endregion
+        
         print("\n🧪 Running tests...")
         # #region agent log
-        debug_log("executor.py:163", "Before run_test_runner", {
+        debug_log("executor.py:260", "Before run_test_runner", {
             "workspace": args.workspace,
-            "time_since_flash": time.time() - flash_start_time if device_target == 'esp32' else None
+            "time_since_flash": time.time() - flash_start_time if device_target == 'esp32' and flash_start_time else None
         }, "D")
         # #endregion
         test_runner_start = time.time()
         tests = run_test_runner(args.workspace, manifest, args.results_dir)
         test_runner_end = time.time()
         # #region agent log
-        debug_log("executor.py:169", "After run_test_runner", {
+        debug_log("executor.py:267", "After run_test_runner", {
             "test_runner_duration_seconds": test_runner_end - test_runner_start,
             "test_count": len(tests),
-            "test_statuses": [t.get('status') for t in tests]
+            "test_statuses": [t.get('status') for t in tests],
+            "time_since_flash_when_test_started": test_runner_start - flash_start_time if device_target == 'esp32' and flash_start_time else None
         }, "D")
         # #endregion
         
