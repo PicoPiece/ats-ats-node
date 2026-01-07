@@ -5,7 +5,7 @@ import os
 import time
 import json
 from pathlib import Path
-from typing import Dict, Any, List, Tuple
+from typing import Dict, Any, List, Tuple, Optional
 from datetime import datetime
 
 from .manifest import load_manifest, get_artifact_name, get_device_target, get_test_plan
