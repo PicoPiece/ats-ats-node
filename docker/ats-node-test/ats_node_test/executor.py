@@ -151,6 +151,51 @@ def run_test_runner(workspace: str, manifest: Dict[str, Any], results_dir: str, 
         import subprocess
         print(f"🧪 Running test runner: {test_runner_path}")
         
+        # CRITICAL: Create wrapper script that checks boot_messages.log first
+        # Test runner script may not support BOOT_MESSAGES_FILE, so we create a wrapper
+        wrapper_script = Path(results_dir) / "run_tests_wrapper.sh"
+        if boot_messages_file and boot_messages_file.exists():
+            print(f"📄 [INFO] Boot messages file available: {boot_messages_file}")
+            print("   Creating wrapper script to use boot_messages.log instead of UART read")
+            
+            # Create wrapper that modifies test runner behavior
+            wrapper_content = f"""#!/bin/bash
+set -e
+
+# Wrapper script to use boot_messages.log if available
+BOOT_MSG_FILE="{boot_messages_file}"
+
+if [ -f "$BOOT_MSG_FILE" ]; then
+    echo "📄 [WRAPPER] Using boot messages from file: $BOOT_MSG_FILE"
+    echo "   File size: $(stat -c%s "$BOOT_MSG_FILE" 2>/dev/null || echo "0") bytes"
+    
+    # Copy boot messages to expected location for test runner
+    # Test runner may look for boot messages in results directory
+    cp "$BOOT_MSG_FILE" "{results_dir}/uart_boot.log" 2>/dev/null || true
+    
+    # Set environment variable for test runner
+    export BOOT_MESSAGES_FILE="$BOOT_MSG_FILE"
+    export UART_BOOT_LOG="{results_dir}/uart_boot.log"
+    
+    echo "✅ [WRAPPER] Boot messages file prepared for test runner"
+else
+    echo "⚠️  [WRAPPER] Boot messages file not found, test runner will read UART"
+fi
+
+# Run original test runner
+exec "{test_runner_path}" "$@"
+"""
+            with open(wrapper_script, 'w') as f:
+                f.write(wrapper_script)
+            os.chmod(wrapper_script, 0o755)
+            print(f"✅ [INFO] Wrapper script created: {wrapper_script}")
+            # #region agent log
+            debug_log("executor.py:run_test_runner", "Wrapper script created", {
+                "wrapper_script": str(wrapper_script),
+                "boot_messages_file": str(boot_messages_file)
+            }, "I")
+            # #endregion
+        
         # Test runner should output to results_dir
         # Pass manifest path as argument
         manifest_path = Path(workspace) / "ats-manifest.yaml"
@@ -162,12 +207,16 @@ def run_test_runner(workspace: str, manifest: Dict[str, Any], results_dir: str, 
         # Pass boot messages file if available (test runner can use this instead of reading UART)
         if boot_messages_file and boot_messages_file.exists():
             env['BOOT_MESSAGES_FILE'] = str(boot_messages_file)
+            env['UART_BOOT_LOG'] = str(Path(results_dir) / "uart_boot.log")
             print(f"📄 [DEBUG] Passing boot messages file to test runner: {boot_messages_file}")
             # #region agent log
             debug_log("executor.py:run_test_runner", "Boot messages file passed to test runner", {
                 "boot_messages_file": str(boot_messages_file)
             }, "I")
             # #endregion
+        
+        # Use wrapper script if available, otherwise use original test runner
+        runner_to_execute = str(wrapper_script) if wrapper_script.exists() else str(test_runner_path)
         
         # #region agent log
         debug_log("executor.py:run_test_runner", "Before subprocess.run", {
@@ -180,7 +229,7 @@ def run_test_runner(workspace: str, manifest: Dict[str, Any], results_dir: str, 
         
         try:
             result = subprocess.run(
-                [str(test_runner_path), str(manifest_path)],
+                [runner_to_execute, str(manifest_path)],
                 cwd=Path(workspace) / "ats-test-esp32-demo",
                 env=env,
                 capture_output=True,
