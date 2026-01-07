@@ -221,6 +221,52 @@ if grep -qi "ets Jun\|Guru Meditation\|Hello from ESP32\|ATS ESP32\|Build succes
                     uart_read_block_pattern3 = r'if\s+\[ -e /dev/ttyUSB0 \]\s*;\s*then\s+if\s+\[ -f \./agent/read_uart\.sh \]\s*;\s*then.*?read_uart\.sh.*?uart_boot\.log.*?else.*?timeout.*cat.*/dev/ttyUSB0.*?uart_boot\.log.*?fi\s+if\s+grep\s+-qi'
                     modified_script = re.sub(uart_read_block_pattern3, file_read_block, modified_script, flags=re.IGNORECASE | re.MULTILINE | re.DOTALL)
                     
+                    # Pattern 3d: Alternative approach - find line numbers and replace manually
+                    # If regex still doesn't work, try string-based replacement
+                    if 'if [ -e /dev/ttyUSB0 ]' in modified_script and './agent/read_uart.sh' in modified_script:
+                        # Find the start and end of the block
+                        lines = modified_script.split('\n')
+                        new_lines = []
+                        skip_until_fi = False
+                        uart_block_found = False
+                        fi_count = 0
+                        
+                        for i, line in enumerate(lines):
+                            # Check if this is the start of UART read block
+                            if 'if [ -e /dev/ttyUSB0 ]' in line and not uart_block_found:
+                                uart_block_found = True
+                                skip_until_fi = True
+                                fi_count = 0
+                                # Replace with file read block
+                                new_lines.append('# CRITICAL: UART read block replaced - read from boot_messages.log instead')
+                                new_lines.append(f'if [ -f "${{BOOT_MESSAGES_LOG}}" ] && [ -s "${{BOOT_MESSAGES_LOG}}" ]; then')
+                                new_lines.append(f'    echo "📄 [ATS] Reading boot messages from ${{BOOT_MESSAGES_LOG}}"')
+                                new_lines.append(f'    cp "${{BOOT_MESSAGES_LOG}}" /workspace/results/uart_boot.log 2>/dev/null || true')
+                                new_lines.append('fi')
+                                new_lines.append('# Check for boot success indicators in boot_messages.log (copied to uart_boot.log)')
+                                new_lines.append('if grep -qi "ets Jun|Guru Meditation|Hello from ESP32|ATS ESP32|Build successful" /workspace/results/uart_boot.log 2>/dev/null; then')
+                                continue
+                            
+                            if skip_until_fi:
+                                # Count nested if/fi to find the end of block
+                                if line.strip().startswith('if '):
+                                    fi_count += 1
+                                elif line.strip() == 'fi' or line.strip().endswith(' fi'):
+                                    if fi_count > 0:
+                                        fi_count -= 1
+                                    else:
+                                        # Found the end of UART read block
+                                        skip_until_fi = False
+                                        # Don't add this 'fi', it's already handled
+                                        continue
+                                # Skip lines in UART read block
+                                continue
+                            
+                            new_lines.append(line)
+                        
+                        if uart_block_found:
+                            modified_script = '\n'.join(new_lines)
+                    
                     # Pattern 4: Replace UART read retry logic block
                     # Find the pattern: "UART read failed" ... retry attempts ... "UART read failed after"
                     retry_block_pattern = r'⚠️\s*UART read failed[^\n]*\n(?:🔄\s*Retry attempt[^\n]*\n)*❌\s*UART read failed after[^\n]*'
