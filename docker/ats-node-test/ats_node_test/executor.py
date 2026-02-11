@@ -104,6 +104,9 @@ def test_uart_read_directly(port: str, timeout: int = 5) -> Tuple[bool, str]:
 
 # Pass = "Hello RKTech" in UART boot log; no log or different string = FAIL
 FIRMWARE_PASS_STRING = "Hello RKTech"
+# Two distinct test cases: boot log captured, and firmware pass string in log
+TEST_NAME_BOOT_LOG = "UART Boot Log"
+TEST_NAME_FIRMWARE_PASS_STRING = "Firmware pass string (Hello RKTech)"
 
 
 def run_test_runner(workspace: str, manifest: Dict[str, Any], results_dir: str, boot_messages_file: Optional[Path] = None) -> List[Dict[str, Any]]:
@@ -443,58 +446,39 @@ read_boot_messages_from_file() {{
             if result.stderr:
                 print(result.stderr, file=sys.stderr)
             
-            # WORKAROUND: If boot messages file was provided and contains boot patterns,
-            # and test runner failed UART boot validation, mark it as PASS
-            # This handles the case where test runner reads too late but we captured boot messages
-            test_failed_uart_validation = (
-                result.returncode != 0 and 
-                'UART boot validation FAILED' in result.stdout
-            )
-            
-            # Also check if UART boot validation PASSED (even if return code is non-zero)
-            test_passed_uart_validation = (
-                'UART boot validation PASSED' in result.stdout or
-                'boot patterns found in boot_messages.log' in result.stdout
-            )
-            
-            if test_failed_uart_validation and boot_messages_data:
-                # Pass ONLY if "Hello RKTech" in log (boot patterns alone are not enough)
-                if FIRMWARE_PASS_STRING in boot_messages_data:
-                    print(f"\n✅ [WORKAROUND] Firmware pass string '{FIRMWARE_PASS_STRING}' found in boot_messages.log")
-                    tests.append({'name': 'test_execution', 'status': 'PASS', 'failure': ''})
-                else:
-                    tests.append({
-                        'name': 'test_execution',
-                        'status': 'FAIL',
-                        'failure': result.stderr if result.stderr else f"Required '{FIRMWARE_PASS_STRING}' not found in boot log"
-                    })
-            elif test_passed_uart_validation:
-                # Pass ONLY if "Hello RKTech" in log (test runner may pass on generic patterns)
-                if boot_messages_data and FIRMWARE_PASS_STRING in boot_messages_data:
-                    print(f"\n✅ UART boot validation PASSED ('{FIRMWARE_PASS_STRING}' in log)")
-                    tests.append({'name': 'test_execution', 'status': 'PASS', 'failure': ''})
-                else:
-                    tests.append({
-                        'name': 'test_execution',
-                        'status': 'FAIL',
-                        'failure': f"Firmware pass string '{FIRMWARE_PASS_STRING}' not found in boot log"
-                    })
+            # Two distinct test cases: (1) boot log captured, (2) "Hello RKTech" in log
+            boot_patterns = ['rst:', 'ets Jun', 'ESP-IDF', 'boot:', 'I (', 'E (', 'W (']
+            has_boot_log = bool(boot_messages_data and len(boot_messages_data.strip()) > 0)
+            boot_log_has_patterns = bool(boot_messages_data and any(p in boot_messages_data for p in boot_patterns))
+            boot_log_ok = has_boot_log and boot_log_has_patterns
+            firmware_ok = bool(boot_messages_data and FIRMWARE_PASS_STRING in boot_messages_data)
+
+            # Test 1: UART Boot Log — PASS if we have boot log with boot patterns
+            if boot_log_ok:
+                print(f"\n✅ [{TEST_NAME_BOOT_LOG}] PASS — boot log captured ({len(boot_messages_data)} bytes, boot patterns present)")
             else:
-                # Normal case: still require "Hello RKTech" in boot log for PASS
-                if boot_messages_data and FIRMWARE_PASS_STRING in boot_messages_data:
-                    tests.append({'name': 'test_execution', 'status': 'PASS', 'failure': ''})
-                elif boot_messages_data:
-                    tests.append({
-                        'name': 'test_execution',
-                        'status': 'FAIL',
-                        'failure': f"Firmware pass string '{FIRMWARE_PASS_STRING}' not found in boot log"
-                    })
-                else:
-                    tests.append({
-                        'name': 'test_execution',
-                        'status': 'PASS' if result.returncode == 0 else 'FAIL',
-                        'failure': result.stderr if result.returncode != 0 else ''
-                    })
+                print(f"\n❌ [{TEST_NAME_BOOT_LOG}] FAIL — no boot log or no boot patterns")
+            tests.append({
+                'name': TEST_NAME_BOOT_LOG,
+                'status': 'PASS' if boot_log_ok else 'FAIL',
+                'failure': '' if boot_log_ok else (
+                    'No boot log captured' if not has_boot_log else 'Boot log has no recognizable boot patterns'
+                )
+            })
+
+            # Test 2: Firmware pass string (Hello RKTech) — PASS only if string in log
+            if firmware_ok:
+                print(f"✅ [{TEST_NAME_FIRMWARE_PASS_STRING}] PASS — '{FIRMWARE_PASS_STRING}' found in log")
+            else:
+                print(f"❌ [{TEST_NAME_FIRMWARE_PASS_STRING}] FAIL — '{FIRMWARE_PASS_STRING}' not in log")
+            tests.append({
+                'name': TEST_NAME_FIRMWARE_PASS_STRING,
+                'status': 'PASS' if firmware_ok else 'FAIL',
+                'failure': '' if firmware_ok else (
+                    f"Required '{FIRMWARE_PASS_STRING}' not found in boot log"
+                    if has_boot_log else "No boot log to check for firmware pass string"
+                )
+            })
         except Exception as e:
             # #region agent log
             debug_log("executor.py:run_test_runner", "Subprocess exception", {
@@ -502,19 +486,13 @@ read_boot_messages_from_file() {{
                 "error_type": type(e).__name__
             }, "D")
             # #endregion
-            tests.append({
-                'name': 'test_execution',
-                'status': 'FAIL',
-                'failure': str(e)
-            })
+            for name in [TEST_NAME_BOOT_LOG, TEST_NAME_FIRMWARE_PASS_STRING]:
+                tests.append({'name': name, 'status': 'FAIL', 'failure': str(e)})
     else:
         print(f"⚠️  Test runner not found: {test_runner_path}")
         print("   Creating placeholder test result")
-        tests.append({
-            'name': 'test_execution',
-            'status': 'SKIP',
-            'failure': 'Test runner not found'
-        })
+        for name in [TEST_NAME_BOOT_LOG, TEST_NAME_FIRMWARE_PASS_STRING]:
+            tests.append({'name': name, 'status': 'SKIP', 'failure': 'Test runner not found'})
     
     return tests
 
@@ -783,18 +761,23 @@ def main():
         if any(t.get('status') == 'FAIL' for t in tests):
             exit_code = 1
     else:
-        tests = [{'name': 'test_execution', 'status': 'SKIP', 'failure': 'Flash failed'}]
+        tests = [
+            {'name': TEST_NAME_BOOT_LOG, 'status': 'SKIP', 'failure': 'Flash failed'},
+            {'name': TEST_NAME_FIRMWARE_PASS_STRING, 'status': 'SKIP', 'failure': 'Flash failed'}
+        ]
     
-    # Step 3: Write results
-    print("\n📊 Writing results...")
-    write_summary(args.results_dir, {
-        'status': 'PASS' if exit_code == 0 else 'FAIL',
-        'tests': tests,
+    # Step 3: Write results (overwrite any ats-summary.json from test runner so artifact has executor result)
+    final_status = 'PASS' if exit_code == 0 else 'FAIL'
+    summary = {
+        'status': final_status,
+        'tests': [{'name': t.get('name', 'test_execution'), 'status': t.get('status', 'UNKNOWN'), 'failure': t.get('failure', '')} for t in tests],
         'manifest': {
             'build_number': manifest['build']['build_number'],
             'device_target': device_target
         }
-    })
+    }
+    print("\n📊 Writing results...")
+    write_summary(args.results_dir, summary)
     write_junit(args.results_dir, tests)
     write_meta(args.results_dir, manifest, exit_code)
     

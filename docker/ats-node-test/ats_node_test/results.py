@@ -7,11 +7,12 @@ from datetime import datetime
 
 
 def write_summary(results_dir: str, summary: Dict[str, Any]) -> None:
-    """Write ats-summary.json."""
+    """Write ats-summary.json (overwrites any file written by test runner so artifact reflects executor result)."""
     path = Path(results_dir) / "ats-summary.json"
+    status = summary.get('status', 'UNKNOWN')
     with open(path, 'w') as f:
         json.dump(summary, f, indent=2)
-    print(f"✅ Summary written: {path}")
+    print(f"✅ Summary written: {path} (status={status})")
 
 
 def write_junit(results_dir: str, tests: List[Dict[str, Any]]) -> None:
