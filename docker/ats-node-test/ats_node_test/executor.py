@@ -568,10 +568,15 @@ def main():
     # Step 1: Flash firmware
     if device_target == 'esp32':
         print("\n🔌 Flashing firmware...")
+        port = detect_esp32_port()
+        if port:
+            print(f"   Serial port: {port} (set SERIAL_PORT to override)")
+        else:
+            print("   Serial port: none found (SERIAL_PORT unset; no /dev/ttyUSB* or /dev/ttyACM*)")
         # #region agent log
         debug_log("executor.py:112", "Before flash_firmware", {
             "artifact_path": str(artifact_path),
-            "port": detect_esp32_port()
+            "port": port
         }, "A")
         # #endregion
         flash_start_time = time.time()

@@ -36,6 +36,8 @@ def flash_firmware(firmware_path: str, port: Optional[str] = None) -> bool:
     
     if not port:
         print("❌ ESP32 port not found", file=sys.stderr)
+        print("   💡 Trên host/agent: kết nối ESP32 qua USB; kiểm tra ls /dev/ttyUSB* /dev/ttyACM*", file=sys.stderr)
+        print("   💡 Jenkins: ATS node (agent) phải có ESP32 cắm USB. Nếu agent chạy trong Docker, host cần --device /dev/ttyUSB0 (hoặc SERIAL_PORT) khi start agent.", file=sys.stderr)
         return False
     
     if not os.path.exists(firmware_path):
@@ -89,8 +91,10 @@ def flash_firmware(firmware_path: str, port: Optional[str] = None) -> bool:
     
     if last_error:
         print(f"❌ Flash failed: {last_error.stderr}", file=sys.stderr)
-        if "Errno 5" in (last_error.stderr or "") or "Input/output error" in (last_error.stderr or ""):
+        stderr = last_error.stderr or ""
+        if "Errno 5" in stderr or "Input/output error" in stderr or "port is busy" in stderr:
             print("   💡 Trên host chạy: ./usb-reset-stuck.sh 1-1.4 hoặc unbind/bind cp210x", file=sys.stderr)
+            print("   💡 Jenkins: đảm bảo ATS agent có ESP32 cắm USB; nếu agent là container thì host phải truyền --device /dev/ttyUSB0 (hoặc port tương ứng) khi chạy agent.", file=sys.stderr)
     return False
 
 
