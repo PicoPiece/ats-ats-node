@@ -35,8 +35,9 @@ def flash_firmware(firmware_path: str, port: Optional[str] = None) -> bool:
         port = detect_esp32_port()
     
     if not port:
-        print("❌ ESP32 port not found", file=sys.stderr)
-        print("   Ensure agent has ESP32 connected (ls /dev/ttyUSB* /dev/ttyACM*). Jenkins: pass --device or SERIAL_PORT if agent runs in Docker.", file=sys.stderr)
+        print("❌ ESP32 port not found (no /dev/ttyUSB* or /dev/ttyACM*)", file=sys.stderr)
+        print("   Ensure agent has ESP32 connected. If you just plugged it in, run: dmesg | tail -20", file=sys.stderr)
+        print("   If you see 'error -32' or 'unable to enumerate USB device', try another USB port on the Pi or a different cable. Jenkins: pass SERIAL_PORT or --device if in Docker.", file=sys.stderr)
         return False
 
     if not os.path.exists(firmware_path):
