@@ -6,7 +6,7 @@ import json
 import time
 from typing import Optional
 from datetime import datetime
-from .hardware import detect_esp32_port
+from .hardware import detect_esp32_port, try_reset_serial_port
 
 # Debug logging
 DEBUG_LOG_PATH = "/home/thait/.cursor/debug.log"
@@ -44,12 +44,9 @@ def flash_firmware(firmware_path: str, port: Optional[str] = None) -> bool:
     
     print(f"📡 Flashing firmware to {port}...")
     
-    # Auto-detect chip type - esptool will detect the connected chip
-    # Flash at 0x10000 (app partition)
-    # If chip type doesn't match firmware, esptool will fail (this is correct behavior)
     cmd = [
         'esptool.py',
-        '--chip', 'auto',  # Auto-detect chip type (ESP32, ESP32-S2, ESP32-S3, etc.)
+        '--chip', 'auto',
         '--port', port,
         '--baud', '460800',
         '--before', 'default_reset',
@@ -61,45 +58,40 @@ def flash_firmware(firmware_path: str, port: Optional[str] = None) -> bool:
         '0x10000', firmware_path
     ]
     
-    try:
-        # #region agent log
-        debug_log("flash_esp32.py:42", "Before esptool subprocess", {
-            "cmd": cmd,
-            "port": port,
-            "firmware_path": firmware_path
-        }, "C")
-        # #endregion
-        flash_start = time.time()
-        result = subprocess.run(cmd, check=True, capture_output=True, text=True)
-        flash_end = time.time()
-        flash_duration = flash_end - flash_start
-        # #region agent log
-        debug_log("flash_esp32.py:50", "After esptool subprocess", {
-            "flash_duration_seconds": flash_duration,
-            "flash_success": True,
-            "stdout_length": len(result.stdout),
-            "stderr_length": len(result.stderr),
-            "has_hard_reset": "--after hard_reset" in " ".join(cmd)
-        }, "C")
-        # #endregion
-        print("✅ Firmware flashed successfully")
-        # #region agent log
-        debug_log("flash_esp32.py:59", "Flash complete, checking serial port release", {
-            "port": port,
-            "time_after_flash": time.time() - flash_end
-        }, "C")
-        # #endregion
-        return True
-    except subprocess.CalledProcessError as e:
-        # #region agent log
-        debug_log("flash_esp32.py:65", "Flash failed", {
-            "error": str(e),
-            "stderr": e.stderr[:200] if e.stderr else None,
-            "returncode": e.returncode
-        }, "C")
-        # #endregion
-        print(f"❌ Flash failed: {e.stderr}", file=sys.stderr)
-        return False
+    max_attempts = 3
+    last_error = None
+    
+    for attempt in range(1, max_attempts + 1):
+        try:
+            if attempt > 1:
+                print(f"   Retry {attempt}/{max_attempts}...")
+            flash_start = time.time()
+            result = subprocess.run(cmd, check=True, capture_output=True, text=True)
+            flash_end = time.time()
+            print("✅ Firmware flashed successfully")
+            return True
+        except subprocess.CalledProcessError as e:
+            last_error = e
+            stderr = (e.stderr or "")
+            is_port_error = (
+                "could not open" in stderr or "Errno 5" in stderr
+                or "Input/output error" in stderr or "port is busy" in stderr
+            )
+            if is_port_error and attempt == 1:
+                if try_reset_serial_port(port):
+                    print("   🔄 Reset serial port (unbind/bind) done, retrying...", file=sys.stderr)
+                    time.sleep(2)
+                    continue
+            if attempt < max_attempts and is_port_error:
+                time.sleep(2)
+                continue
+            break
+    
+    if last_error:
+        print(f"❌ Flash failed: {last_error.stderr}", file=sys.stderr)
+        if "Errno 5" in (last_error.stderr or "") or "Input/output error" in (last_error.stderr or ""):
+            print("   💡 Trên host chạy: ./usb-reset-stuck.sh 1-1.4 hoặc unbind/bind cp210x", file=sys.stderr)
+    return False
 
 
 def reset_esp32(port: Optional[str] = None) -> bool:
