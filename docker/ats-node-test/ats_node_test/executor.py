@@ -102,6 +102,10 @@ def test_uart_read_directly(port: str, timeout: int = 5) -> Tuple[bool, str]:
         return False, str(e)
 
 
+# Pass = "Hello RKTech" in UART boot log; no log or different string = FAIL
+FIRMWARE_PASS_STRING = "Hello RKTech"
+
+
 def run_test_runner(workspace: str, manifest: Dict[str, Any], results_dir: str, boot_messages_file: Optional[Path] = None) -> List[Dict[str, Any]]:
     """Invoke test runner (ats-test-esp32-demo) and collect results."""
     # Test runner is expected to be in workspace
@@ -454,45 +458,43 @@ read_boot_messages_from_file() {{
             )
             
             if test_failed_uart_validation and boot_messages_data:
-                boot_patterns = ['rst:', 'ets Jun', 'ESP-IDF', 'boot:', 'I (', 'E (', 'W (']
-                found_boot_patterns = [p for p in boot_patterns if p in boot_messages_data]
-                if found_boot_patterns:
-                    print(f"\n✅ [WORKAROUND] Boot messages were captured and contain boot patterns: {', '.join(found_boot_patterns)}")
-                    print("   Test runner read UART too late, but boot validation should PASS based on captured messages")
-                    # #region agent log
-                    debug_log("executor.py:run_test_runner", "Workaround: Boot validation PASS based on captured messages", {
-                        "found_patterns": found_boot_patterns,
-                        "test_runner_returncode": result.returncode
-                    }, "I")
-                    # #endregion
-                    # Override test result to PASS
-                    tests.append({
-                        'name': 'test_execution',
-                        'status': 'PASS',
-                        'failure': ''
-                    })
+                # Pass ONLY if "Hello RKTech" in log (boot patterns alone are not enough)
+                if FIRMWARE_PASS_STRING in boot_messages_data:
+                    print(f"\n✅ [WORKAROUND] Firmware pass string '{FIRMWARE_PASS_STRING}' found in boot_messages.log")
+                    tests.append({'name': 'test_execution', 'status': 'PASS', 'failure': ''})
                 else:
-                    # No boot patterns found, test runner failure is valid
                     tests.append({
                         'name': 'test_execution',
                         'status': 'FAIL',
-                        'failure': result.stderr if result.stderr else 'UART boot validation failed'
+                        'failure': result.stderr if result.stderr else f"Required '{FIRMWARE_PASS_STRING}' not found in boot log"
                     })
             elif test_passed_uart_validation:
-                # UART boot validation passed (even if return code is non-zero due to other issues)
-                print("\n✅ UART boot validation PASSED (boot patterns found in boot_messages.log)")
-                tests.append({
-                    'name': 'test_execution',
-                    'status': 'PASS',
-                    'failure': ''
-                })
+                # Pass ONLY if "Hello RKTech" in log (test runner may pass on generic patterns)
+                if boot_messages_data and FIRMWARE_PASS_STRING in boot_messages_data:
+                    print(f"\n✅ UART boot validation PASSED ('{FIRMWARE_PASS_STRING}' in log)")
+                    tests.append({'name': 'test_execution', 'status': 'PASS', 'failure': ''})
+                else:
+                    tests.append({
+                        'name': 'test_execution',
+                        'status': 'FAIL',
+                        'failure': f"Firmware pass string '{FIRMWARE_PASS_STRING}' not found in boot log"
+                    })
             else:
-                # Normal case: use test runner result
-                tests.append({
-                    'name': 'test_execution',
-                    'status': 'PASS' if result.returncode == 0 else 'FAIL',
-                    'failure': result.stderr if result.returncode != 0 else ''
-                })
+                # Normal case: still require "Hello RKTech" in boot log for PASS
+                if boot_messages_data and FIRMWARE_PASS_STRING in boot_messages_data:
+                    tests.append({'name': 'test_execution', 'status': 'PASS', 'failure': ''})
+                elif boot_messages_data:
+                    tests.append({
+                        'name': 'test_execution',
+                        'status': 'FAIL',
+                        'failure': f"Firmware pass string '{FIRMWARE_PASS_STRING}' not found in boot log"
+                    })
+                else:
+                    tests.append({
+                        'name': 'test_execution',
+                        'status': 'PASS' if result.returncode == 0 else 'FAIL',
+                        'failure': result.stderr if result.returncode != 0 else ''
+                    })
         except Exception as e:
             # #region agent log
             debug_log("executor.py:run_test_runner", "Subprocess exception", {
