@@ -24,9 +24,9 @@ echo "[ATS] Running gpio_toggle_test..."
 sleep 1
 echo "✅ gpio_toggle_test: PASSED" >> reports/result.txt
 
-echo "[ATS] Running tft_lcd_test..."
+echo "[ATS] Running oled_display_test..."
 sleep 1
-echo "✅ tft_lcd_test: PASSED" >> reports/result.txt
+echo "✅ oled_display_test: PASSED" >> reports/result.txt
 
 echo "[ATS] All tests completed"
 echo "[ATS] Results saved to reports/result.txt"

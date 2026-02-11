@@ -35,15 +35,13 @@ def flash_firmware(firmware_path: str, port: Optional[str] = None) -> bool:
         port = detect_esp32_port()
     
     if not port:
-        print("❌ ESP32 port not found (no /dev/ttyUSB* or /dev/ttyACM*)", file=sys.stderr)
-        print("   Ensure agent has ESP32 connected. If you just plugged it in, run: dmesg | tail -20", file=sys.stderr)
-        print("   If you see 'error -32' or 'unable to enumerate USB device', try another USB port on the Pi or a different cable. Jenkins: pass SERIAL_PORT or --device if in Docker.", file=sys.stderr)
+        print("❌ ESP32 port not found", file=sys.stderr)
         return False
-
+    
     if not os.path.exists(firmware_path):
         print(f"❌ Firmware not found: {firmware_path}", file=sys.stderr)
         return False
-
+    
     print(f"📡 Flashing firmware to {port}...")
     
     cmd = [
@@ -91,9 +89,8 @@ def flash_firmware(firmware_path: str, port: Optional[str] = None) -> bool:
     
     if last_error:
         print(f"❌ Flash failed: {last_error.stderr}", file=sys.stderr)
-        stderr = last_error.stderr or ""
-        if "Errno 5" in stderr or "Input/output error" in stderr or "port is busy" in stderr:
-            print("   Serial port I/O error. Check agent USB/udev and docs (e.g. ESP32-USB-STABILITY-FIX.md).", file=sys.stderr)
+        if "Errno 5" in (last_error.stderr or "") or "Input/output error" in (last_error.stderr or ""):
+            print("   💡 Trên host chạy: ./usb-reset-stuck.sh 1-1.4 hoặc unbind/bind cp210x", file=sys.stderr)
     return False
 
 
