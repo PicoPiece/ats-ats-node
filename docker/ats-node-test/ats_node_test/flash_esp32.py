@@ -43,7 +43,21 @@ def flash_firmware(firmware_path: str, port: Optional[str] = None) -> bool:
     if not os.path.exists(firmware_path):
         print(f"❌ Firmware not found: {firmware_path}", file=sys.stderr)
         return False
-    
+
+    # Pre-check: port exists but may return I/O error (CP2102 -32). Hint unplug/replug.
+    try:
+        import serial
+        with serial.Serial(port, 115200, timeout=0.5) as _:
+            pass
+    except Exception as e:
+        err_str = str(e)
+        if "Errno 5" in err_str or "Input/output error" in err_str or "could not open" in err_str:
+            print("   ⚠️  Port tồn tại nhưng mở bị lỗi (device CP2102 có thể đang lỗi trạng thái).", file=sys.stderr)
+            print("   💡 Rút USB ESP32, đợi 10s, cắm lại rồi chạy test lại.", file=sys.stderr)
+        # Continue to try esptool anyway
+    except ImportError:
+        pass
+
     print(f"📡 Flashing firmware to {port}...")
     
     cmd = [
