@@ -102,6 +102,10 @@ def test_uart_read_directly(port: str, timeout: int = 5) -> Tuple[bool, str]:
         return False, str(e)
 
 
+# Pass = "Hello RKTech" in UART log; no log or different = failed
+FIRMWARE_PASS_STRING = "Hello RKTech"
+
+
 def run_test_runner(workspace: str, manifest: Dict[str, Any], results_dir: str, boot_messages_file: Optional[Path] = None) -> List[Dict[str, Any]]:
     """Invoke test runner (ats-test-esp32-demo) and collect results."""
     # Test runner is expected to be in workspace
@@ -138,8 +142,8 @@ def run_test_runner(workspace: str, manifest: Dict[str, Any], results_dir: str, 
     if boot_messages_data:
         # Boot patterns: ESP32 boot sequence indicators
         boot_patterns = ['rst:', 'ets Jun', 'ESP-IDF', 'Guru Meditation', 'boot:', 'I (', 'E (', 'W (']
-        # Firmware patterns: Application-specific indicators
-        firmware_patterns = ['firmware', 'app_main', 'Starting', 'Initialized', 'Ready']
+        # Firmware patterns: Application-specific indicators (include required pass string)
+        firmware_patterns = ['firmware', 'app_main', 'Starting', 'Initialized', 'Ready', FIRMWARE_PASS_STRING]
         
         found_boot_patterns = [p for p in boot_patterns if p in boot_messages_data]
         found_firmware_patterns = [p for p in firmware_patterns if p in boot_messages_data]
@@ -208,8 +212,8 @@ else
     echo "❌ [ATS] boot_messages.log not found: ${{BOOT_MESSAGES_LOG}}"
     BOOT_MESSAGES_FOUND=false
 fi
-# Check for boot success indicators in boot_messages.log (copied to uart_boot.log)
-if grep -qi "ets Jun\|Guru Meditation\|Hello from ESP32\|ATS ESP32\|Build successful" /workspace/results/uart_boot.log 2>/dev/null; then'''
+# Check for boot success indicators and firmware pass string (Hello RKTech) in boot_messages.log
+if grep -qi "ets Jun\|Guru Meditation\|Hello from ESP32\|ATS ESP32\|Build successful\|Hello RKTech" /workspace/results/uart_boot.log 2>/dev/null; then'''
                     modified_script = re.sub(uart_read_block_pattern, file_read_block, modified_script, flags=re.IGNORECASE | re.MULTILINE | re.DOTALL)
                     
                     # Pattern 3b: Also replace simpler pattern without read_uart.sh (fallback)
@@ -288,7 +292,7 @@ fi'''
                     validation_replacement = f'''# Check boot_messages.log for validation
 if [ -f "${{BOOT_MESSAGES_LOG}}" ] && [ -s "${{BOOT_MESSAGES_LOG}}" ]; then
     # Search for boot patterns in boot_messages.log
-    if grep -qE "(rst:|ets Jun|ESP-IDF|Guru Meditation|Hello from ESP32|ATS ESP32|Build successful|I \\(|E \\(|W \\()" "${{BOOT_MESSAGES_LOG}}" 2>/dev/null; then
+    if grep -qE "(rst:|ets Jun|ESP-IDF|Guru Meditation|Hello from ESP32|ATS ESP32|Build successful|Hello RKTech|I \\(|E \\(|W \\()" "${{BOOT_MESSAGES_LOG}}" 2>/dev/null; then
         echo "✅ UART boot validation PASSED (boot patterns found in boot_messages.log)"
         TEST_RESULTS+=(UART_BOOT=PASS)
         ((TEST_PASSED++))
@@ -308,7 +312,7 @@ fi'''
                     validation_pass_replacement = f'''# Check boot_messages.log for validation
 if [ -f "${{BOOT_MESSAGES_LOG}}" ] && [ -s "${{BOOT_MESSAGES_LOG}}" ]; then
     # Search for boot patterns in boot_messages.log
-    if grep -qE "(rst:|ets Jun|ESP-IDF|I \\(|E \\(|W \\()" "${{BOOT_MESSAGES_LOG}}" 2>/dev/null; then
+    if grep -qE "(rst:|ets Jun|ESP-IDF|Hello RKTech|I \\(|E \\(|W \\()" "${{BOOT_MESSAGES_LOG}}" 2>/dev/null; then
         echo "✅ UART boot validation PASSED (boot patterns found in boot_messages.log)"
         BOOT_VALIDATION_PASSED=true
     else
@@ -454,38 +458,47 @@ read_boot_messages_from_file() {{
             )
             
             if test_failed_uart_validation and boot_messages_data:
-                boot_patterns = ['rst:', 'ets Jun', 'ESP-IDF', 'boot:', 'I (', 'E (', 'W (']
-                found_boot_patterns = [p for p in boot_patterns if p in boot_messages_data]
-                if found_boot_patterns:
-                    print(f"\n✅ [WORKAROUND] Boot messages were captured and contain boot patterns: {', '.join(found_boot_patterns)}")
-                    print("   Test runner read UART too late, but boot validation should PASS based on captured messages")
-                    # #region agent log
-                    debug_log("executor.py:run_test_runner", "Workaround: Boot validation PASS based on captured messages", {
-                        "found_patterns": found_boot_patterns,
-                        "test_runner_returncode": result.returncode
-                    }, "I")
-                    # #endregion
-                    # Override test result to PASS
+                # Pass = "Hello RKTech" in log; no log or different = failed
+                if FIRMWARE_PASS_STRING in boot_messages_data:
+                    print(f"\n✅ [WORKAROUND] Firmware pass string '{FIRMWARE_PASS_STRING}' found in boot_messages.log")
                     tests.append({
                         'name': 'test_execution',
                         'status': 'PASS',
                         'failure': ''
                     })
                 else:
-                    # No boot patterns found, test runner failure is valid
+                    boot_patterns = ['rst:', 'ets Jun', 'ESP-IDF', 'boot:', 'I (', 'E (', 'W (']
+                    found_boot_patterns = [p for p in boot_patterns if p in boot_messages_data]
+                    if found_boot_patterns:
+                        print(f"\n✅ [WORKAROUND] Boot messages were captured and contain boot patterns: {', '.join(found_boot_patterns)}")
+                        print("   Test runner read UART too late, but boot validation should PASS based on captured messages")
+                        debug_log("executor.py:run_test_runner", "Workaround: Boot validation PASS based on captured messages", {
+                            "found_patterns": found_boot_patterns,
+                            "test_runner_returncode": result.returncode
+                        }, "I")
+                        tests.append({
+                            'name': 'test_execution',
+                            'status': 'PASS',
+                            'failure': ''
+                        })
+                    else:
+                        # No "Hello RKTech" and no boot patterns = failed
+                        tests.append({
+                            'name': 'test_execution',
+                            'status': 'FAIL',
+                            'failure': result.stderr if result.stderr else 'UART boot validation failed (no Hello RKTech in log)'
+                        })
+            elif test_passed_uart_validation:
+                # Pass only if "Hello RKTech" in log; no log or different = failed
+                if boot_messages_data and FIRMWARE_PASS_STRING in boot_messages_data:
+                    print(f"\n✅ UART boot validation PASSED ('{FIRMWARE_PASS_STRING}' in log)")
+                    tests.append({'name': 'test_execution', 'status': 'PASS', 'failure': ''})
+                else:
                     tests.append({
                         'name': 'test_execution',
                         'status': 'FAIL',
-                        'failure': result.stderr if result.stderr else 'UART boot validation failed'
+                        'failure': f"Firmware pass string '{FIRMWARE_PASS_STRING}' not found in log"
                     })
-            elif test_passed_uart_validation:
-                # UART boot validation passed (even if return code is non-zero due to other issues)
-                print("\n✅ UART boot validation PASSED (boot patterns found in boot_messages.log)")
-                tests.append({
-                    'name': 'test_execution',
-                    'status': 'PASS',
-                    'failure': ''
-                })
             else:
                 # Normal case: use test runner result
                 tests.append({
