@@ -11,7 +11,7 @@ from datetime import datetime
 from .manifest import load_manifest, get_artifact_name, get_device_target, get_test_plan
 from .hardware import detect_esp32_port, check_gpio_access
 from .flash_esp32 import flash_firmware, reset_esp32
-from .results import write_summary, write_junit, write_meta
+from .results import write_summary, write_junit, write_meta, write_metrics
 
 # Debug logging
 DEBUG_LOG_PATH = "/home/thait/.cursor/debug.log"
@@ -767,6 +767,7 @@ def main():
         ]
     
     # Step 3: Write results (overwrite any ats-summary.json from test runner so artifact has executor result)
+    total_duration = time.time() - flash_start_time if flash_start_time else 0.0
     final_status = 'PASS' if exit_code == 0 else 'FAIL'
     summary = {
         'status': final_status,
@@ -780,6 +781,7 @@ def main():
     write_summary(args.results_dir, summary)
     write_junit(args.results_dir, tests)
     write_meta(args.results_dir, manifest, exit_code)
+    write_metrics(args.results_dir, tests, manifest, duration=total_duration)
     
     print(f"\n✅ Execution complete (exit code: {exit_code})")
     sys.exit(exit_code)
