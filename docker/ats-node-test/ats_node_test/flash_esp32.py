@@ -90,7 +90,7 @@ def flash_firmware(firmware_path: str, port: Optional[str] = None) -> bool:
     if last_error:
         print(f"❌ Flash failed: {last_error.stderr}", file=sys.stderr)
         if "Errno 5" in (last_error.stderr or "") or "Input/output error" in (last_error.stderr or ""):
-            print("   💡 Trên host chạy: ./usb-reset-stuck.sh 1-1.4 hoặc unbind/bind cp210x", file=sys.stderr)
+            print("   💡 On host run: ./usb-reset-stuck.sh 1-1.4 or unbind/bind cp210x", file=sys.stderr)
     return False
 
 
